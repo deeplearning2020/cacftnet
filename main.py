@@ -277,10 +277,6 @@ if __name__ == "__main__":
     cudnn.deterministic = True
     cudnn.benchmark = False
 
-    if not torch.cuda.is_available():
-        print("[ERROR] CUDA is not available. Please check your GPU setup.")
-        exit(1)
-
     device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
     print(f"[INFO] Using device: {device}")
 
