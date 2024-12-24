@@ -296,8 +296,10 @@ if __name__ == "__main__":
     cudnn.deterministic = True
     cudnn.benchmark = False
 
-    device = set_device(args.gpu_id)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
 
+    # Load data
     if args.dataset == 'Indian':
         data = loadmat('./data/IndianPine.mat')
     elif args.dataset == 'Pavia':
@@ -331,22 +333,7 @@ if __name__ == "__main__":
     x_train_band, x_test_band, x_true_band = train_and_test_data(mirror_image, band, total_pos_train, total_pos_test, total_pos_true, patch=args.patches, band_patch=args.band_patches)
     y_train, y_test, y_true = train_and_test_label(number_train, number_test, number_true, num_classes)
 
-    x_train = x_train_band.to(device)
-    y_train = torch.from_numpy(y_train).type(torch.LongTensor).to(device)
-    Label_train = Data.TensorDataset(x_train, y_train)
-    
-    x_test = x_test_band.to(device)
-    y_test = torch.from_numpy(y_test).type(torch.LongTensor).to(device)
-    Label_test = Data.TensorDataset(x_test, y_test)
-    
-    x_true = x_true_band.to(device)
-    y_true = torch.from_numpy(y_true).type(torch.LongTensor).to(device)
-    Label_true = Data.TensorDataset(x_true, y_true)
-
-    label_train_loader = Data.DataLoader(Label_train, batch_size=args.batch_size, shuffle=True)
-    label_test_loader = Data.DataLoader(Label_test, batch_size=args.batch_size, shuffle=True)
-    label_true_loader = Data.DataLoader(Label_true, batch_size=100, shuffle=False)
-
+    # Move model and criterion to device
     model = ViT(
         image_size = args.patches,
         near_band = args.band_patches,
@@ -360,12 +347,28 @@ if __name__ == "__main__":
         dropout = 0.1,
         emb_dropout = 0.1,
         mode = args.mode
-    )
-    model = model.to(device)
+    ).to(device)
 
     criterion = nn.CrossEntropyLoss().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.epoches//10, gamma=args.gamma)
+
+    # Move data to device
+    x_train = x_train_band.to(device)
+    y_train = torch.from_numpy(y_train).type(torch.LongTensor).to(device)
+    x_test = x_test_band.to(device)
+    y_test = torch.from_numpy(y_test).type(torch.LongTensor).to(device)
+    x_true = x_true_band.to(device)
+    y_true = torch.from_numpy(y_true).type(torch.LongTensor).to(device)
+
+    # Create data loaders
+    Label_train = Data.TensorDataset(x_train, y_train)
+    Label_test = Data.TensorDataset(x_test, y_test)
+    Label_true = Data.TensorDataset(x_true, y_true)
+
+    label_train_loader = Data.DataLoader(Label_train, batch_size=args.batch_size, shuffle=True)
+    label_test_loader = Data.DataLoader(Label_test, batch_size=args.batch_size, shuffle=True)
+    label_true_loader = Data.DataLoader(Label_true, batch_size=100, shuffle=False)
 
     if args.flag_test == 'test':
         if args.mode == 'ViT':
@@ -393,16 +396,12 @@ if __name__ == "__main__":
         savemat('matrix.mat', {'P':prediction_matrix, 'label':label})
 
     elif args.flag_test == 'train':
-        print("[INFO] Starting training process")
-        tic = time.time()
+        print(f"Starting training on {device}")
         best_acc = 0.0
-
         for epoch in range(args.epoches):
             model.train()
             train_acc, train_obj, tar_t, pre_t = train_epoch(model, label_train_loader, criterion, optimizer, device)
-            OA1, AA_mean1, Kappa1, AA1 = output_metric(tar_t, pre_t)
-            print(f"[INFO] Epoch: {epoch + 1:03d} | Train Loss: {train_obj:.4f} | Train Acc: {train_acc:.4f}")
-
+            
             if (epoch % args.test_freq == 0) or (epoch == args.epoches - 1):
                 model.eval()
                 tar_v, pre_v = valid_epoch(model, label_test_loader, criterion, optimizer, device)
@@ -411,7 +410,7 @@ if __name__ == "__main__":
                 if OA2 > best_acc:
                     best_acc = OA2
                     torch.save(model.state_dict(), "./log/IP.pt")
-                print(f"[INFO] Epoch: {epoch + 1:03d} | Test Acc: {OA2:.4f}")
+                print(f"Epoch: {epoch + 1:03d} | Test Acc: {OA2:.4f}")
                 
             scheduler.step()
                                                                   

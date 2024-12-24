@@ -11,8 +11,7 @@ class Residual(nn.Module):
     def __init__(self, fn):
         super().__init__()
         self.fn = fn
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.to(self.device)
+        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def forward(self, x, **kwargs):
         return self.fn(x, **kwargs) + x
@@ -22,8 +21,7 @@ class PreNorm(nn.Module):
         super().__init__()
         self.norm = nn.LayerNorm(dim)
         self.fn = fn
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.to(self.device)
+        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def forward(self, x, **kwargs):
         return self.fn(self.norm(x), **kwargs)
@@ -38,8 +36,7 @@ class FeedForward(nn.Module):
             nn.Linear(hidden_dim, dim),
             nn.Dropout(dropout)
         )
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.to(self.device)
+        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def forward(self, x):
         return self.net(x)
@@ -53,8 +50,7 @@ class XCA(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.to(self.device)
+        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def forward(self, x, mask = None):
         B, N, C = x.shape
@@ -89,8 +85,7 @@ class Attention(nn.Module):
             nn.Linear(inner_dim, dim),
             nn.Dropout(dropout)
         )
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.to(self.device)
+        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def forward(self, x, mask = None):
         b, n, _, h = *x.shape, self.heads
@@ -176,8 +171,7 @@ class OurFE(nn.Module):
             nn.BatchNorm2d(channel),
             nn.ReLU()
         )
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.to(self.device)
+        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     def forward(self, x):
         out1 = self.conv1(x)
