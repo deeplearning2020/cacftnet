@@ -34,6 +34,11 @@ args = parser.parse_args()
 
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)
 
+def set_device(gpu_id):
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
+    print(f"[INFO] Using device: {device}")
+    return device
+
 def chooose_train_and_test_point(train_data, test_data, true_data, num_classes):
     number_train = []
     pos_train = {}
@@ -142,6 +147,11 @@ def train_and_test_data(mirror_image, band, train_point, test_point, true_point,
     print(f"[INFO] x_train_band shape = {x_train_band.shape}, type = {x_train_band.dtype}")
     print(f"[INFO] x_test_band shape = {x_test_band.shape}, type = {x_test_band.dtype}")
     print(f"[INFO] x_true_band shape = {x_true_band.shape}, type = {x_true_band.dtype}")
+    
+    x_train_band = torch.from_numpy(x_train_band.transpose(0,2,1)).type(torch.FloatTensor)
+    x_test_band = torch.from_numpy(x_test_band.transpose(0,2,1)).type(torch.FloatTensor) 
+    x_true_band = torch.from_numpy(x_true_band.transpose(0,2,1)).type(torch.FloatTensor)
+    
     return x_train_band, x_test_band, x_true_band
 
 def train_and_test_label(number_train, number_test, number_true, num_classes):
@@ -197,22 +207,27 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
     top1 = AvgrageMeter()
     tar = np.array([])
     pre = np.array([])
+    
     for batch_idx, (batch_data, batch_target) in enumerate(train_loader):
         batch_data = batch_data.to(device)
-        batch_target = batch_target.to(device)   
-
+        batch_target = batch_target.to(device)
+        
         optimizer.zero_grad()
         batch_pred = model(batch_data)
         loss = criterion(batch_pred, batch_target)
         loss.backward()
-        optimizer.step()       
+        optimizer.step()
 
         prec1, t, p = accuracy(batch_pred, batch_target, topk=(1,))
         n = batch_data.shape[0]
-        objs.update(loss.data, n)
-        top1.update(prec1[0].data, n)
-        tar = np.append(tar, t.data.cpu().numpy())
-        pre = np.append(pre, p.data.cpu().numpy())
+        objs.update(loss.item(), n)
+        top1.update(prec1[0].item(), n)
+        tar = np.append(tar, t.cpu().numpy())
+        pre = np.append(pre, p.cpu().numpy())
+        
+        if batch_idx % 50 == 0:
+            torch.cuda.empty_cache()
+            
     return top1.avg, objs.avg, tar, pre
 
 def valid_epoch(model, valid_loader, criterion, optimizer, device):
@@ -220,34 +235,38 @@ def valid_epoch(model, valid_loader, criterion, optimizer, device):
     top1 = AvgrageMeter()
     tar = np.array([])
     pre = np.array([])
+    
+    model.eval()
     with torch.no_grad():
         for batch_idx, (batch_data, batch_target) in enumerate(valid_loader):
             batch_data = batch_data.to(device)
-            batch_target = batch_target.to(device)   
-
+            batch_target = batch_target.to(device)
+            
             batch_pred = model(batch_data)
             loss = criterion(batch_pred, batch_target)
 
             prec1, t, p = accuracy(batch_pred, batch_target, topk=(1,))
             n = batch_data.shape[0]
-            objs.update(loss.data, n)
-            top1.update(prec1[0].data, n)
-            tar = np.append(tar, t.data.cpu().numpy())
-            pre = np.append(pre, p.data.cpu().numpy())
+            objs.update(loss.item(), n)
+            top1.update(prec1[0].item(), n)
+            tar = np.append(tar, t.cpu().numpy())
+            pre = np.append(pre, p.cpu().numpy())
+            
     return tar, pre
 
 def test_epoch(model, test_loader, criterion, optimizer, device):
     pre = np.array([])
+    
+    model.eval()
     with torch.no_grad():
         for batch_idx, (batch_data, batch_target) in enumerate(test_loader):
             batch_data = batch_data.to(device)
-            batch_target = batch_target.to(device)   
-
             batch_pred = model(batch_data)
-
+            
             _, pred = batch_pred.topk(1, 1, True, True)
             pp = pred.squeeze()
-            pre = np.append(pre, pp.data.cpu().numpy())
+            pre = np.append(pre, pp.cpu().numpy())
+            
     return pre
 
 def output_metric(tar, pre):
@@ -277,8 +296,7 @@ if __name__ == "__main__":
     cudnn.deterministic = True
     cudnn.benchmark = False
 
-    device = torch.device(f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu")
-    print(f"[INFO] Using device: {device}")
+    device = set_device(args.gpu_id)
 
     if args.dataset == 'Indian':
         data = loadmat('./data/IndianPine.mat')
@@ -313,16 +331,16 @@ if __name__ == "__main__":
     x_train_band, x_test_band, x_true_band = train_and_test_data(mirror_image, band, total_pos_train, total_pos_test, total_pos_true, patch=args.patches, band_patch=args.band_patches)
     y_train, y_test, y_true = train_and_test_label(number_train, number_test, number_true, num_classes)
 
-    x_train = torch.from_numpy(x_train_band.transpose(0,2,1)).type(torch.FloatTensor)
-    y_train = torch.from_numpy(y_train).type(torch.LongTensor)
+    x_train = x_train_band.to(device)
+    y_train = torch.from_numpy(y_train).type(torch.LongTensor).to(device)
     Label_train = Data.TensorDataset(x_train, y_train)
     
-    x_test = torch.from_numpy(x_test_band.transpose(0,2,1)).type(torch.FloatTensor)
-    y_test = torch.from_numpy(y_test).type(torch.LongTensor)
+    x_test = x_test_band.to(device)
+    y_test = torch.from_numpy(y_test).type(torch.LongTensor).to(device)
     Label_test = Data.TensorDataset(x_test, y_test)
     
-    x_true = torch.from_numpy(x_true_band.transpose(0,2,1)).type(torch.FloatTensor)
-    y_true = torch.from_numpy(y_true).type(torch.LongTensor)
+    x_true = x_true_band.to(device)
+    y_true = torch.from_numpy(y_true).type(torch.LongTensor).to(device)
     Label_true = Data.TensorDataset(x_true, y_true)
 
     label_train_loader = Data.DataLoader(Label_train, batch_size=args.batch_size, shuffle=True)

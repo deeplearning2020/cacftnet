@@ -415,6 +415,8 @@ class BiLevelRoutingAttention(nn.Module):
 class ViT(nn.Module):
     def __init__(self, image_size, near_band, num_patches, num_classes, channels_band, dim, depth, heads, mlp_dim, pool='cls', dim_head=16, dropout=0., emb_dropout=0., mode='ViT'):
         super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
         patch_dim = image_size ** 2 * near_band
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
         self.patch_to_embedding = nn.Linear(patch_dim, dim)
@@ -437,29 +439,13 @@ class ViT(nn.Module):
         self.wv = nn.Linear(image_size ** 2, image_size ** 2, bias=True)
         self.Biformer = BiLevelRoutingAttention(channels_band)
         
-        # Initialize device and move model to GPU if available
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.to(self.device)
-        
-        # Print detailed information about GPU usage and model deployment
-        print(f"\nModel Initialization Details:")
-        print(f"{'='*50}")
-        print(f"Device: {self.device}")
-        if torch.cuda.is_available():
-            print(f"GPU: {torch.cuda.get_device_name(0)}")
-            print(f"Total GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**2:.2f} MB")
-            print(f"Current GPU Memory Usage: {torch.cuda.memory_allocated(0) / 1024**2:.2f} MB")
-            print(f"GPU Memory Cached: {torch.cuda.memory_reserved(0) / 1024**2:.2f} MB")
-        print(f"{'='*50}\n")
 
     def forward(self, x, mask=None):
-        # Ensure input is on the correct device
-        if not x.is_cuda and self.device.type == "cuda":
-            x = x.to(self.device)
-            if mask is not None:
-                mask = mask.to(self.device)
-        
-        # First path: Feature extraction and pooling
+        x = x.to(self.device)
+        if mask is not None:
+            mask = mask.to(self.device)
+            
         x1 = x.reshape(x.shape[0], x.shape[1], 7, 7)
         x1 = self.ournet(x1)
         x1 = self.pool2(x1)
@@ -467,18 +453,14 @@ class ViT(nn.Module):
         x1 = x1.reshape(x1.shape[0], x1.shape[1], 49)
         x1_S = torch.mean(x1, dim=0)
         ns = x1_S.shape[0]
-        
-        # Calculate covariance matrix for first path
         mean = torch.mean(x1_S, dim=0)
-        centrS = x1_S - mean 
+        centrS = x1_S - mean
         covmat2 = torch.mm(centrS.T, centrS)/(ns - 1)
         
-        # Second path: Biformer processing
         x2 = x.reshape(x.shape[0], x.shape[1], 7, 7)
         x2 = self.Biformer(x2)
         x2 = x2.reshape(x2.shape[0], x2.shape[1], 49)
         
-        # Combine paths and calculate final covariance
         x3 = x1 + x2
         x3_S = torch.mean(x3, dim=0)
         n = x3_S.shape[0]
@@ -486,30 +468,22 @@ class ViT(nn.Module):
         centrS_x3 = x3_S - mean_x3
         covmat3 = torch.mm(centrS_x3.T, centrS_x3)/(n - 1)
         
-        # Apply non-linear transformations to covariance
         covmat = covmat3 - covmat2
         covmat = (1-torch.tanh(covmat)**2)*torch.sigmoid(covmat)*(1-torch.sigmoid(covmat))
         x = torch.matmul(x3, covmat)
         x = x + x3
         
-        # Transform to embedding space
         x = self.patch_to_embedding(x)
         b, n, _ = x.shape
         
-        # Add classification token and position embedding
         cls_tokens = repeat(self.cls_token, '() n d -> b n d', b=b)
         x = torch.cat((cls_tokens, x), dim=1)
         x += self.pos_embedding[:, :(n + 1)]
         x = self.dropout(x)
         
-        # Apply transformer and extract classification token
         x = self.transformer(x, mask)
         x = self.to_latent(x[:, 0])
         
-        # Final classification
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()  # Ensure all GPU computations are completed
-            
         return self.mlp_head(x)
 
     def get_memory_stats(self):
