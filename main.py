@@ -32,13 +32,21 @@ parser.add_argument('--weight_decay', type=float, default=0, help='weight_decay'
 parser.add_argument('--channels_band', type=int, default=0, help='channels_band')
 args = parser.parse_args()
 
+# Set GPU device first
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)
+
+# Initialize CUDA
+torch.cuda.init()
+
+# Simple GPU check
+if torch.cuda.is_available():
+    print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+    print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**2:.0f}MB")
+else:
+    raise RuntimeError("No CUDA device available. Please check your GPU setup")
+
+# Set device
 device = torch.device("cuda")
-
-# Ensure CUDA is available
-assert torch.cuda.is_available(), "CUDA is not available. Please check your GPU installation"
-
-print(f"Using GPU: {torch.cuda.get_device_name(0)}")
 
 def set_device(gpu_id):
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
@@ -359,13 +367,17 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.epoches//10, gamma=args.gamma)
 
-    # Move data to GPU
-    x_train = x_train_band.cuda()
-    y_train = torch.from_numpy(y_train).long().cuda()
-    x_test = x_test_band.cuda()
-    y_test = torch.from_numpy(y_test).long().cuda()
-    x_true = x_true_band.cuda()
-    y_true = torch.from_numpy(y_true).long().cuda()
+    # Move data to GPU with error checking
+    try:
+        x_train = x_train_band.cuda()
+        y_train = torch.from_numpy(y_train).long().cuda()
+        x_test = x_test_band.cuda()
+        y_test = torch.from_numpy(y_test).long().cuda()
+        x_true = x_true_band.cuda()
+        y_true = torch.from_numpy(y_true).long().cuda()
+    except RuntimeError as e:
+        print(f"Error moving data to GPU: {e}")
+        raise
 
     # Create data loaders
     Label_train = Data.TensorDataset(x_train, y_train)
@@ -433,7 +445,9 @@ if __name__ == "__main__":
 
     # At the start of training
     torch.cuda.empty_cache()
+    print(f"Initial GPU memory allocated: {torch.cuda.memory_allocated() / 1024**2:.1f}MB")
 
-    # In training loop
-    if epoch % 5 == 0:  # Every 5 epochs
+    # Inside training loop
+    if epoch % 5 == 0:
         torch.cuda.empty_cache()
+        print(f"GPU memory allocated: {torch.cuda.memory_allocated() / 1024**2:.1f}MB")

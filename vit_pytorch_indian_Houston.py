@@ -432,13 +432,15 @@ class ViT(nn.Module):
         self.wv = nn.Linear(image_size ** 2, image_size ** 2, bias=True)
         self.Biformer = BiLevelRoutingAttention(channels_band)
         
-        self.cuda()
+        if torch.cuda.is_available():
+            self.cuda()
 
     def forward(self, x, mask=None):
-        x = x.cuda()
-        if mask is not None:
-            mask = mask.cuda()
-            
+        if torch.cuda.is_available():
+            x = x.cuda()
+            if mask is not None:
+                mask = mask.cuda()
+        
         x1 = x.reshape(x.shape[0], x.shape[1], 7, 7)
         x1 = self.ournet(x1)
         x1 = self.pool2(x1)
