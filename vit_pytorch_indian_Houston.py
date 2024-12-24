@@ -11,7 +11,7 @@ class Residual(nn.Module):
     def __init__(self, fn):
         super().__init__()
         self.fn = fn
-        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        self.cuda()
 
     def forward(self, x, **kwargs):
         return self.fn(x, **kwargs) + x
@@ -21,7 +21,7 @@ class PreNorm(nn.Module):
         super().__init__()
         self.norm = nn.LayerNorm(dim)
         self.fn = fn
-        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        self.cuda()
 
     def forward(self, x, **kwargs):
         return self.fn(self.norm(x), **kwargs)
@@ -36,7 +36,7 @@ class FeedForward(nn.Module):
             nn.Linear(hidden_dim, dim),
             nn.Dropout(dropout)
         )
-        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        self.cuda()
 
     def forward(self, x):
         return self.net(x)
@@ -50,7 +50,7 @@ class XCA(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        self.cuda()
 
     def forward(self, x, mask = None):
         B, N, C = x.shape
@@ -85,7 +85,7 @@ class Attention(nn.Module):
             nn.Linear(inner_dim, dim),
             nn.Dropout(dropout)
         )
-        self.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        self.cuda()
 
     def forward(self, x, mask = None):
         b, n, _, h = *x.shape, self.heads
@@ -409,7 +409,6 @@ class BiLevelRoutingAttention(nn.Module):
 class ViT(nn.Module):
     def __init__(self, image_size, near_band, num_patches, num_classes, channels_band, dim, depth, heads, mlp_dim, pool='cls', dim_head=16, dropout=0., emb_dropout=0., mode='ViT'):
         super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         patch_dim = image_size ** 2 * near_band
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
@@ -433,12 +432,12 @@ class ViT(nn.Module):
         self.wv = nn.Linear(image_size ** 2, image_size ** 2, bias=True)
         self.Biformer = BiLevelRoutingAttention(channels_band)
         
-        self.to(self.device)
+        self.cuda()
 
     def forward(self, x, mask=None):
-        x = x.to(self.device)
+        x = x.cuda()
         if mask is not None:
-            mask = mask.to(self.device)
+            mask = mask.cuda()
             
         x1 = x.reshape(x.shape[0], x.shape[1], 7, 7)
         x1 = self.ournet(x1)

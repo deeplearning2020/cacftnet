@@ -33,6 +33,12 @@ parser.add_argument('--channels_band', type=int, default=0, help='channels_band'
 args = parser.parse_args()
 
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)
+device = torch.device("cuda")
+
+# Ensure CUDA is available
+assert torch.cuda.is_available(), "CUDA is not available. Please check your GPU installation"
+
+print(f"Using GPU: {torch.cuda.get_device_name(0)}")
 
 def set_device(gpu_id):
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
@@ -202,15 +208,15 @@ def accuracy(output, target, topk=(1,)):
         res.append(correct_k.mul_(100.0/batch_size))
     return res, target, pred.squeeze()
 
-def train_epoch(model, train_loader, criterion, optimizer, device):
+def train_epoch(model, train_loader, criterion, optimizer):
     objs = AvgrageMeter()
     top1 = AvgrageMeter()
     tar = np.array([])
     pre = np.array([])
     
     for batch_idx, (batch_data, batch_target) in enumerate(train_loader):
-        batch_data = batch_data.to(device)
-        batch_target = batch_target.to(device)
+        batch_data = batch_data.cuda(non_blocking=True)
+        batch_target = batch_target.cuda(non_blocking=True)
         
         optimizer.zero_grad()
         batch_pred = model(batch_data)
@@ -230,7 +236,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
             
     return top1.avg, objs.avg, tar, pre
 
-def valid_epoch(model, valid_loader, criterion, optimizer, device):
+def valid_epoch(model, valid_loader, criterion, optimizer):
     objs = AvgrageMeter()
     top1 = AvgrageMeter()
     tar = np.array([])
@@ -239,8 +245,8 @@ def valid_epoch(model, valid_loader, criterion, optimizer, device):
     model.eval()
     with torch.no_grad():
         for batch_idx, (batch_data, batch_target) in enumerate(valid_loader):
-            batch_data = batch_data.to(device)
-            batch_target = batch_target.to(device)
+            batch_data = batch_data.cuda(non_blocking=True)
+            batch_target = batch_target.cuda(non_blocking=True)
             
             batch_pred = model(batch_data)
             loss = criterion(batch_pred, batch_target)
@@ -254,13 +260,13 @@ def valid_epoch(model, valid_loader, criterion, optimizer, device):
             
     return tar, pre
 
-def test_epoch(model, test_loader, criterion, optimizer, device):
+def test_epoch(model, test_loader, criterion):
     pre = np.array([])
     
     model.eval()
     with torch.no_grad():
         for batch_idx, (batch_data, batch_target) in enumerate(test_loader):
-            batch_data = batch_data.to(device)
+            batch_data = batch_data.cuda(non_blocking=True)
             batch_pred = model(batch_data)
             
             _, pred = batch_pred.topk(1, 1, True, True)
@@ -353,13 +359,13 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.epoches//10, gamma=args.gamma)
 
-    # Move data to device
-    x_train = x_train_band.to(device)
-    y_train = torch.from_numpy(y_train).type(torch.LongTensor).to(device)
-    x_test = x_test_band.to(device)
-    y_test = torch.from_numpy(y_test).type(torch.LongTensor).to(device)
-    x_true = x_true_band.to(device)
-    y_true = torch.from_numpy(y_true).type(torch.LongTensor).to(device)
+    # Move data to GPU
+    x_train = x_train_band.cuda()
+    y_train = torch.from_numpy(y_train).long().cuda()
+    x_test = x_test_band.cuda()
+    y_test = torch.from_numpy(y_test).long().cuda()
+    x_true = x_true_band.cuda()
+    y_true = torch.from_numpy(y_true).long().cuda()
 
     # Create data loaders
     Label_train = Data.TensorDataset(x_train, y_train)
@@ -379,10 +385,10 @@ if __name__ == "__main__":
             raise ValueError("Wrong Parameters")
             
         model.eval()
-        tar_v, pre_v = valid_epoch(model, label_test_loader, criterion, optimizer, device)
+        tar_v, pre_v = valid_epoch(model, label_test_loader, criterion, optimizer)
         OA2, AA_mean2, Kappa2, AA2 = output_metric(tar_v, pre_v)
 
-        pre_u = test_epoch(model, label_true_loader, criterion, optimizer, device)
+        pre_u = test_epoch(model, label_true_loader, criterion)
         prediction_matrix = np.zeros((height, width), dtype=float)
         for i in range(total_pos_true.shape[0]):
             prediction_matrix[total_pos_true[i,0], total_pos_true[i,1]] = pre_u[i] + 1
@@ -400,11 +406,11 @@ if __name__ == "__main__":
         best_acc = 0.0
         for epoch in range(args.epoches):
             model.train()
-            train_acc, train_obj, tar_t, pre_t = train_epoch(model, label_train_loader, criterion, optimizer, device)
+            train_acc, train_obj, tar_t, pre_t = train_epoch(model, label_train_loader, criterion, optimizer)
             
             if (epoch % args.test_freq == 0) or (epoch == args.epoches - 1):
                 model.eval()
-                tar_v, pre_v = valid_epoch(model, label_test_loader, criterion, optimizer, device)
+                tar_v, pre_v = valid_epoch(model, label_test_loader, criterion, optimizer)
                 OA2, AA_mean2, Kappa2, AA2 = output_metric(tar_v, pre_v)
                 
                 if OA2 > best_acc:
@@ -424,3 +430,10 @@ if __name__ == "__main__":
     print("\n[CONFIG] Training Parameters:")
     for k, v in vars(args).items():
         print(f"[CONFIG] {k}: {v}")
+
+    # At the start of training
+    torch.cuda.empty_cache()
+
+    # In training loop
+    if epoch % 5 == 0:  # Every 5 epochs
+        torch.cuda.empty_cache()
