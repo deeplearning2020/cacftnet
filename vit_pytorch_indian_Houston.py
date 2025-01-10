@@ -428,7 +428,7 @@ class ViT(nn.Module):
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, num_patches, mode)
         self.pool = pool
         # Adaptive pooling instead of fixed kernel size
-        self.pool2 = nn.AdaptiveAvgPool2d(output_size=(image_size-2, image_size-2))
+        self.pool2 = nn.AdaptiveAvgPool2d(output_size=(image_size, image_size))
         self.to_latent = nn.Identity()
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(dim),
@@ -452,15 +452,28 @@ class ViT(nn.Module):
             x = x.cuda()
             if mask is not None:
                 mask = mask.cuda()
+
+        # Print input shape for debugging
+        batch_size, channels, sequence_length = x.shape
+        print(f"Input shape: {x.shape}")
         
-        # Dynamic reshaping based on image_size
-        x1 = x.reshape(x.shape[0], x.shape[1], self.image_size, self.image_size)
+        # Reshape considering the total sequence length
+        size = int(math.sqrt(sequence_length))
+        x1 = x.reshape(batch_size, channels, size, size)
+        print(f"After first reshape: {x1.shape}")
+        
         x1 = self.ournet(x1)
+        print(f"After ournet: {x1.shape}")
+        
         x1 = self.pool2(x1)
+        print(f"After pool2: {x1.shape}")
+        
         x1 = self.conv4(x1)
-        # Calculate flattened size dynamically
-        flatten_size = (self.image_size - 2) ** 2
-        x1 = x1.reshape(x1.shape[0], x1.shape[1], flatten_size)
+        print(f"After conv4: {x1.shape}")
+        
+        # Flatten spatial dimensions
+        x1 = x1.reshape(batch_size, channels, -1)
+        print(f"After flatten: {x1.shape}")
         
         x1_S = torch.mean(x1, dim=0)
         ns = x1_S.shape[0]
@@ -468,10 +481,10 @@ class ViT(nn.Module):
         centrS = x1_S - mean
         covmat2 = torch.mm(centrS.T, centrS)/(ns - 1)
         
-        # Handle x2 with dynamic sizing
-        x2 = x.reshape(x.shape[0], x.shape[1], self.image_size, self.image_size)
+        # Handle x2 branch similarly
+        x2 = x.reshape(batch_size, channels, size, size)
         x2 = self.Biformer(x2)
-        x2 = x2.reshape(x2.shape[0], x2.shape[1], flatten_size)
+        x2 = x2.reshape(batch_size, channels, -1)
         
         x3 = x1 + x2
         x3_S = torch.mean(x3, dim=0)
