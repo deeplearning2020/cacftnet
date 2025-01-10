@@ -107,46 +107,55 @@ class Attention(nn.Module):
         return out
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_head, dropout, num_channel, mode):
+    def __init__(self, dim, depth, heads, dim_head, mlp_head, dropout, num_patches, mode):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout))),
-                Residual(PreNorm(dim, FeedForward(dim, mlp_head, dropout = dropout)))
+                Residual(PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout))),
+                Residual(PreNorm(dim, FeedForward(dim, mlp_head, dropout=dropout)))
             ]))
         self.mode = mode
         self.skipcat = nn.ModuleList([])
         for _ in range(depth-2):
-            self.skipcat.append(nn.Conv2d(num_channel+1, num_channel+1, [1, 3], 1, 0))
+            self.skipcat.append(nn.Conv2d(num_patches+1, num_patches+1, [1, 3], 1, 0))
         self.simam = simam_module()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.to(self.device)
 
-    def forward(self, x, mask = None):
+    def forward(self, x, mask=None):
         if self.mode == 'ViT':
             for attn, ff in self.layers:
-                x = attn(x, mask = mask)
+                x = attn(x, mask=mask)
                 x = ff(x)
+            return x
         elif self.mode == 'CAF':
             last_output = []
             caf_output = []
             nl = 0
-            for attn, ff in self.layers:           
+            for attn, ff in self.layers:
                 last_output.append(x)
                 if nl > 1:
                     xd = last_output[nl-1]
-                    xd = xd.reshape(xd.shape[0],xd.shape[1],8,8)
+                    xd = xd.reshape(xd.shape[0], xd.shape[1], 8, 8)
                     xd = self.simam(xd)
-                    xd = xd.reshape(xd.shape[0],xd.shape[1],64)
-                    x = self.skipcat[nl-2](torch.cat([x.unsqueeze(3), xd.unsqueeze(3),last_output[nl-2].unsqueeze(3)], dim=3)).squeeze(3)
+                    xd = xd.reshape(xd.shape[0], xd.shape[1], 64)
+                    x = self.skipcat[nl-2](torch.cat([x.unsqueeze(3), 
+                                                    xd.unsqueeze(3),
+                                                    last_output[nl-2].unsqueeze(3)], dim=3)).squeeze(3)
                     caf_output.append(x)
-                x = attn(x, mask = mask)
+                x = attn(x, mask=mask)
                 x = ff(x)
                 nl += 1
-        
-        x = self.skipcat[0](torch.cat([caf_output[0].unsqueeze(3), caf_output[1].unsqueeze(3),caf_output[2].unsqueeze(3)], dim=3)).squeeze(3)
-        return x
+            
+            # Only perform final concatenation if we have collected CAF outputs
+            if len(caf_output) >= 3:
+                x = self.skipcat[0](torch.cat([caf_output[0].unsqueeze(3),
+                                             caf_output[1].unsqueeze(3),
+                                             caf_output[2].unsqueeze(3)], dim=3)).squeeze(3)
+            return x
+        else:
+            raise ValueError(f"Unknown mode: {self.mode}")
 
 class OurFE(nn.Module):
     def __init__(self, channel, dim):
