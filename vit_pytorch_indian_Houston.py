@@ -455,25 +455,18 @@ class ViT(nn.Module):
 
         # Print input shape for debugging
         batch_size, channels, sequence_length = x.shape
-        print(f"Input shape: {x.shape}")
         
         # Reshape considering the total sequence length
         size = int(math.sqrt(sequence_length))
         x1 = x.reshape(batch_size, channels, size, size)
-        print(f"After first reshape: {x1.shape}")
         
         x1 = self.ournet(x1)
-        print(f"After ournet: {x1.shape}")
-        
         x1 = self.pool2(x1)
-        print(f"After pool2: {x1.shape}")
         
         x1 = self.conv4(x1)
-        print(f"After conv4: {x1.shape}")
         
         # Flatten spatial dimensions
         x1 = x1.reshape(batch_size, channels, -1)
-        print(f"After flatten: {x1.shape}")
         
         x1_S = torch.mean(x1, dim=0)
         ns = x1_S.shape[0]
