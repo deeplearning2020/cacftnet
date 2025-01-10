@@ -420,13 +420,15 @@ class ViT(nn.Module):
         super().__init__()
         
         patch_dim = image_size ** 2 * near_band
+        self.image_size = image_size  # Store image_size for use in forward pass
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
         self.patch_to_embedding = nn.Linear(patch_dim, dim)
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, num_patches, mode)
         self.pool = pool
-        self.pool2 = nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
+        # Adaptive pooling instead of fixed kernel size
+        self.pool2 = nn.AdaptiveAvgPool2d(output_size=(image_size-2, image_size-2))
         self.to_latent = nn.Identity()
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(dim),
@@ -436,6 +438,7 @@ class ViT(nn.Module):
         self.conv4 = nn.Conv2d(in_channels=channels_band, out_channels=channels_band, kernel_size=1)
         self.ca = CoordAtt(channels_band, channels_band)
         self.SimAm = simam_module()
+        # Dynamic sizing for attention weights
         self.wq = nn.Linear(image_size ** 2, image_size ** 2, bias=True)
         self.wk = nn.Linear(image_size ** 2, image_size ** 2, bias=True)
         self.wv = nn.Linear(image_size ** 2, image_size ** 2, bias=True)
@@ -450,20 +453,25 @@ class ViT(nn.Module):
             if mask is not None:
                 mask = mask.cuda()
         
-        x1 = x.reshape(x.shape[0], x.shape[1], 7, 7)
+        # Dynamic reshaping based on image_size
+        x1 = x.reshape(x.shape[0], x.shape[1], self.image_size, self.image_size)
         x1 = self.ournet(x1)
         x1 = self.pool2(x1)
         x1 = self.conv4(x1)
-        x1 = x1.reshape(x1.shape[0], x1.shape[1], 49)
+        # Calculate flattened size dynamically
+        flatten_size = (self.image_size - 2) ** 2
+        x1 = x1.reshape(x1.shape[0], x1.shape[1], flatten_size)
+        
         x1_S = torch.mean(x1, dim=0)
         ns = x1_S.shape[0]
         mean = torch.mean(x1_S, dim=0)
         centrS = x1_S - mean
         covmat2 = torch.mm(centrS.T, centrS)/(ns - 1)
         
-        x2 = x.reshape(x.shape[0], x.shape[1], 7, 7)
+        # Handle x2 with dynamic sizing
+        x2 = x.reshape(x.shape[0], x.shape[1], self.image_size, self.image_size)
         x2 = self.Biformer(x2)
-        x2 = x2.reshape(x2.shape[0], x2.shape[1], 49)
+        x2 = x2.reshape(x2.shape[0], x2.shape[1], flatten_size)
         
         x3 = x1 + x2
         x3_S = torch.mean(x3, dim=0)
