@@ -431,9 +431,7 @@ if __name__ == "__main__":
                 print(f"Epoch: {epoch + 1:03d} | Test Acc: {OA2:.4f}")
                 
             scheduler.step()
-                                                                  
-        toc = time.time()
-        print(f"[INFO] Total training time: {toc - tic:.2f} seconds")
+                                                                
 
     print("\n[RESULTS] Final Metrics:")
     print(f"[RESULTS] OA: {OA2:.4f} | AA: {AA_mean2:.4f} | Kappa: {Kappa2:.4f}")
